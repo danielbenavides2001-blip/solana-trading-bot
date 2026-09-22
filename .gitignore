@@ -1,0 +1,20 @@
+# Environment variables & secrets (NEVER COMMIT SENSITIVE KEYS)
+.env
+*.env
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.venv/
+
+# Local logs & state
+bot.log
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db

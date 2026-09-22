@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: solana-trading-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot_engine.py
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: EXECUTION_MODE
+        value: PAPER
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: BINANCE_API_KEY
+        sync: false
+      - key: BINANCE_API_SECRET
+        sync: false
