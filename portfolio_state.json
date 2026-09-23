@@ -1,18 +1,19 @@
 {
   "initial_capital": 21.79,
-  "current_capital": 21.79,
-  "in_position": true,
-  "position": {
-    "type": "LONG",
-    "entry_price": 119.43,
-    "stop_loss": 117.91,
-    "atr": 1.01,
-    "margin": 18.0,
-    "quantity": 0.75,
-    "open_time": "2026-09-22T23:30:17.378980"
-  },
-  "total_trades": 0,
-  "winning_trades": 0,
+  "current_capital": 21.89,
+  "in_position": false,
+  "position": null,
+  "total_trades": 1,
+  "winning_trades": 1,
   "losing_trades": 0,
-  "history": []
+  "history": [
+    {
+      "type": "LONG",
+      "entry": 119.42,
+      "exit": 119.61,
+      "reason": "USER_MANUAL_CLOSE",
+      "pnl": 0.10,
+      "closed_at": "2026-09-23T04:57:05.000Z"
+    }
+  ]
 }
