@@ -392,7 +392,7 @@ class BotEngine:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="SOL/USDT Champion Trading Bot")
-    parser.add_argument("--mode", choices=["PAPER", "LIVE"], default="PAPER", help="Modo de ejecución")
+    parser.add_argument("--mode", choices=["PAPER", "LIVE"], default=config.EXECUTION_MODE, help="Modo de ejecución")
     parser.add_argument("--step", action="store_true", help="Ejecutar un solo paso")
     args = parser.parse_args()
 
