@@ -23,6 +23,7 @@ import config
 from market_data import MarketData
 from strategy import TradingStrategy
 from notifications import TelegramNotifier
+from auto_optimizer import AutoOptimizer
 
 # Force unbuffered standard output so Railway displays logs immediately
 if hasattr(sys.stdout, "reconfigure"):
@@ -52,6 +53,7 @@ class HealthHandler(BaseHTTPRequestHandler):
         state_data = {
             "status": "online",
             "bot": "SOL/USDT Champion Trading Bot (5x Futures)",
+            "active_strategy": self.bot_instance.strategy.strategy_name if self.bot_instance else "UNKNOWN",
             "mode": self.bot_instance.mode if self.bot_instance else "UNKNOWN",
             "capital_usdt": round(self.bot_instance.state.get("current_capital", 0.0), 2) if self.bot_instance else 0.0,
             "in_position": self.bot_instance.state.get("in_position", False) if self.bot_instance else False,
@@ -100,6 +102,9 @@ class BotEngine:
         port = int(os.getenv("PORT", 8080))
         start_health_server(self, port)
 
+        # Start continuous auto-optimizer scheduler (every 12h)
+        self.start_optimizer_schedule()
+
         # Notify Telegram on start
         try:
             df_1h = self.market_data.fetch_candles("1h", limit=30)
@@ -109,6 +114,28 @@ class BotEngine:
             self.notifier.notify_bot_started(self.state["current_capital"], self.mode, h_ch, l_ch)
         except Exception as e:
             logging.warning(f"Note on initial telegram notify: {e}")
+
+    def start_optimizer_schedule(self):
+        """Runs periodic auto-optimizer tournaments every 12 hours in background."""
+        def _loop():
+            # Initial run delay so bot startup is immediate
+            time.sleep(20)
+            while True:
+                try:
+                    logging.info("[AUTO-OPTIMIZER] Iniciando torneo de re-calibración adaptativo...")
+                    opt = AutoOptimizer(self.futures_symbol)
+                    new_conf = opt.evaluate_and_update(days=45)
+                    if new_conf:
+                        self.strategy.reload_strategy_config()
+                        logging.info(f"[AUTO-OPTIMIZER] Estrategia activa actualizada: {self.strategy.strategy_name}")
+                except Exception as e:
+                    logging.error(f"[AUTO-OPTIMIZER] Error en ciclo de optimización: {e}")
+                
+                # Sleep 12 hours
+                time.sleep(43200)
+
+        opt_thread = threading.Thread(target=_loop, daemon=True)
+        opt_thread.start()
 
     def load_state(self) -> dict:
         if os.path.exists(STATE_FILE):
@@ -219,48 +246,37 @@ class BotEngine:
         # Send Telegram alert
         self.notifier.notify_trade_opened(sig_type, current_price, qty_sol, sl_price, margin)
 
-    def check_position_exit(self, current_price: float, atr: float):
-        """Dynamic ATR Trailing Stop management."""
+    def check_position_exit(self, current_price: float, atr: float, ema_200: float):
+        """Dynamic 4-rule exit check via Strategy."""
         if not self.state["in_position"] or not self.state["position"]:
             return
 
         pos = self.state["position"]
         pos_type = pos["type"]
         entry_p = pos["entry_price"]
-        sl_p = pos["stop_loss"]
         margin = pos["margin"]
         notional = margin * self.leverage
 
-        exit_trade = False
-        exit_price = None
+        exit_eval = self.strategy.evaluate_exit(pos, current_price, atr, ema_200)
 
-        if pos_type == "LONG":
-            new_sl = current_price - (config.ATR_TRAIL * atr)
-            if new_sl > sl_p:
-                pos["stop_loss"] = new_sl
-                sl_p = new_sl
-                logging.info(f"Trailing Stop subió a ${sl_p:.2f} (Precio: ${current_price:.2f})")
-                self.notifier.notify_trailing_update(sl_p, current_price, pos_type)
+        # 1. Update Trailing / Breakeven Stop Loss if moved
+        if exit_eval["updated_sl"] != pos["stop_loss"]:
+            old_sl = pos["stop_loss"]
+            pos["stop_loss"] = exit_eval["updated_sl"]
+            self.save_state()
+            logging.info(f"Stop Loss ajustado a ${pos['stop_loss']:.2f} (Anterior: ${old_sl:.2f} | Precio: ${current_price:.2f})")
+            self.notifier.notify_trailing_update(pos["stop_loss"], current_price, pos_type)
 
-            if current_price <= sl_p:
-                exit_trade = True
-                exit_price = sl_p
-                price_ret = (sl_p - entry_p) / entry_p
+        # 2. Check if an exit condition triggered
+        if exit_eval["exit"]:
+            exit_price = exit_eval["exit_price"] or current_price
+            exit_reason = exit_eval["exit_reason"]
 
-        elif pos_type == "SHORT":
-            new_sl = current_price + (config.ATR_TRAIL * atr)
-            if new_sl < sl_p:
-                pos["stop_loss"] = new_sl
-                sl_p = new_sl
-                logging.info(f"Trailing Stop bajó a ${sl_p:.2f} (Precio: ${current_price:.2f})")
-                self.notifier.notify_trailing_update(sl_p, current_price, pos_type)
+            if pos_type == "LONG":
+                price_ret = (exit_price - entry_p) / entry_p
+            else:
+                price_ret = (entry_p - exit_price) / entry_p
 
-            if current_price >= sl_p:
-                exit_trade = True
-                exit_price = sl_p
-                price_ret = (entry_p - sl_p) / entry_p
-
-        if exit_trade:
             fees = notional * (config.TAKER_FEE * 2)
             net_pnl = (notional * price_ret) - fees
 
@@ -274,6 +290,7 @@ class BotEngine:
                         amount=pos["quantity"],
                         params={"reduceOnly": True}
                     )
+                    logging.info(f"Live exit order executed successfully: {close_side} {pos['quantity']} SOL")
                 except Exception as e:
                     logging.error(f"Error closing live position: {e}")
 
@@ -285,13 +302,13 @@ class BotEngine:
                 self.state["losing_trades"] += 1
 
             style = "green" if net_pnl > 0 else "red"
-            console.print(f"[bold {style}]Posición {pos_type} cerrada por Trailing Stop: PnL ${net_pnl:+.2f} USDT | Saldo: ${self.state['current_capital']:.2f}[/bold {style}]")
+            console.print(f"[bold {style}]Posición {pos_type} cerrada por {exit_reason}: PnL ${net_pnl:+.2f} USDT | Saldo: ${self.state['current_capital']:.2f}[/bold {style}]")
 
             self.state["history"].append({
                 "type": pos_type,
                 "entry": entry_p,
                 "exit": exit_price,
-                "reason": "TRAILING_STOP",
+                "reason": exit_reason,
                 "pnl": round(net_pnl, 2),
                 "closed_at": datetime.now().isoformat()
             })
@@ -308,14 +325,15 @@ class BotEngine:
         df_1h = self.market_data.fetch_candles("1h", limit=250)
         signal = self.strategy.evaluate_signal(df_1h)
         atr = signal.get("atr", 1.5)
+        ema_200 = signal.get("ema_200", curr_price)
         
-        # If in position, manage trailing stop exit
+        # If in position, manage dynamic exit rules
         if self.state["in_position"]:
             pos = self.state["position"]
-            pos_msg = f"[POSICIÓN ACTIVA {pos['type']}] Entrada: ${pos['entry_price']:.2f} | Actual: ${curr_price:.2f} | Trailing SL: ${pos['stop_loss']:.2f}"
+            pos_msg = f"[POSICIÓN ACTIVA {pos['type']}] Entrada: ${pos['entry_price']:.2f} | Actual: ${curr_price:.2f} | Trailing SL: ${pos['stop_loss']:.2f} | EMA 200: ${ema_200:.2f}"
             logging.info(pos_msg)
             print(pos_msg, flush=True)
-            self.check_position_exit(curr_price, atr)
+            self.check_position_exit(curr_price, atr, ema_200)
             return
 
         # If not in position, check for 24h channel breakout

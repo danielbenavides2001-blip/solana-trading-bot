@@ -1,0 +1,18 @@
+{
+  "strategy_name": "Donchian 24h Conservador (Trail 1.8x)",
+  "channel_period": 24,
+  "ema_trend_period": 200,
+  "atr_period": 14,
+  "atr_initial_sl": 2.0,
+  "atr_trail": 1.8,
+  "breakeven_trigger_pct": 0.015,
+  "last_backtest_date": "2026-09-22T23:37:06.146863",
+  "backtest_metrics": {
+    "net_return_pct": 133.67,
+    "profit_factor": 2.44,
+    "win_rate_pct": 53.7,
+    "max_drawdown_pct": 26.53,
+    "calmar_ratio": 5.04,
+    "total_trades": 41
+  }
+}
