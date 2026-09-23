@@ -23,11 +23,14 @@ from market_data import MarketData
 from strategy import TradingStrategy
 from notifications import TelegramNotifier
 
-# Logging configuration
+# Logging configuration (Output to both bot.log and stdout for Railway live logs)
 logging.basicConfig(
-    filename="bot.log",
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 console = Console()
 
