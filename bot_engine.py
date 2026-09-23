@@ -246,6 +246,44 @@ class BotEngine:
         # Send Telegram alert
         self.notifier.notify_trade_opened(sig_type, current_price, qty_sol, sl_price, margin)
 
+        # Sync native Stop Loss order directly to Binance server
+        if self.mode == "LIVE":
+            self.sync_live_stop_loss(sl_price, sig_type)
+
+    def sync_live_stop_loss(self, stop_price: float, pos_type: str):
+        """Places or updates native conditional STOP_MARKET order directly on Binance."""
+        if self.mode != "LIVE" or not self.exchange:
+            return
+        try:
+            # 1. Cancel previous algo stop orders
+            try:
+                self.exchange.fapiPrivateDeleteAlgoOpenOrders({"symbol": "SOLUSDT"})
+            except Exception:
+                pass
+
+            # 2. Place updated STOP_MARKET with closePosition=True
+            close_side = "sell" if pos_type == "LONG" else "buy"
+            order = self.exchange.create_order(
+                symbol=self.symbol,
+                type="STOP_MARKET",
+                side=close_side,
+                amount=None,
+                params={"stopPrice": stop_price, "closePosition": True}
+            )
+            logging.info(f"[BINANCE SYNC] Stop Loss sincronizado en Binance a ${stop_price:.2f} (Algo ID: {order.get('id')})")
+        except Exception as e:
+            logging.warning(f"[BINANCE SYNC] Error sincronizando Stop Loss en Binance: {e}")
+
+    def cleanup_live_stop_loss(self):
+        """Cancels all remaining algo stop orders on Binance when position closes."""
+        if self.mode != "LIVE" or not self.exchange:
+            return
+        try:
+            self.exchange.fapiPrivateDeleteAlgoOpenOrders({"symbol": "SOLUSDT"})
+            logging.info("[BINANCE SYNC] Órdenes stop residuales canceladas en Binance.")
+        except Exception as e:
+            logging.warning(f"[BINANCE SYNC] Error limpiando órdenes stop en Binance: {e}")
+
     def check_position_exit(self, current_price: float, atr: float, ema_200: float):
         """Dynamic 4-rule exit check via Strategy."""
         if not self.state["in_position"] or not self.state["position"]:
@@ -266,6 +304,8 @@ class BotEngine:
             self.save_state()
             logging.info(f"Stop Loss ajustado a ${pos['stop_loss']:.2f} (Anterior: ${old_sl:.2f} | Precio: ${current_price:.2f})")
             self.notifier.notify_trailing_update(pos["stop_loss"], current_price, pos_type)
+            if self.mode == "LIVE":
+                self.sync_live_stop_loss(pos["stop_loss"], pos_type)
 
         # 2. Check if an exit condition triggered
         if exit_eval["exit"]:
@@ -293,6 +333,7 @@ class BotEngine:
                     logging.info(f"Live exit order executed successfully: {close_side} {pos['quantity']} SOL")
                 except Exception as e:
                     logging.error(f"Error closing live position: {e}")
+                self.cleanup_live_stop_loss()
 
             self.state["current_capital"] += net_pnl
             self.state["total_trades"] += 1
