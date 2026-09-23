@@ -15,6 +15,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 from typing import Optional, Dict, Any
 
+import sys
 import ccxt
 from rich.console import Console
 
@@ -23,7 +24,11 @@ from market_data import MarketData
 from strategy import TradingStrategy
 from notifications import TelegramNotifier
 
-# Logging configuration (Output to both bot.log and stdout for Railway live logs)
+# Force unbuffered standard output so Railway displays logs immediately
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+
+# Logging configuration (Output to both bot.log and stdout with immediate flushing)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -307,16 +312,22 @@ class BotEngine:
         # If in position, manage trailing stop exit
         if self.state["in_position"]:
             pos = self.state["position"]
-            logging.info(f"Posición activa {pos['type']} | Entrada: ${pos['entry_price']:.2f} | Actual: ${curr_price:.2f} | Trailing SL: ${pos['stop_loss']:.2f}")
+            pos_msg = f"[POSICIÓN ACTIVA {pos['type']}] Entrada: ${pos['entry_price']:.2f} | Actual: ${curr_price:.2f} | Trailing SL: ${pos['stop_loss']:.2f}"
+            logging.info(pos_msg)
+            print(pos_msg, flush=True)
             self.check_position_exit(curr_price, atr)
             return
 
         # If not in position, check for 24h channel breakout
         if signal["signal"] in ("LONG", "SHORT"):
-            logging.info(f"SEÑAL CAMPEONA DETECTADA: {signal['signal']} @ ${curr_price:.2f} | Razón: {signal['reason']}")
+            sig_msg = f"¡SEÑAL DETECTADA! {signal['signal']} @ ${curr_price:.2f} | {signal['reason']}"
+            logging.info(sig_msg)
+            print(sig_msg, flush=True)
             self.execute_trade(signal, curr_price)
         else:
-            logging.info(f"Monitoreo 24h: SOL=${curr_price:.2f} | Techo 24h: ${signal.get('high_ch')} | Suelo 24h: ${signal.get('low_ch')} | Macro EMA200: ${signal.get('ema_200')} | Estado: {signal.get('reason')}")
+            status_msg = f"[24H LIVE] SOL: ${curr_price:.2f} | Techo 24h: ${signal.get('high_ch')} | Suelo 24h: ${signal.get('low_ch')} | Macro EMA200: ${signal.get('ema_200')} | Estado: {signal.get('reason')}"
+            logging.info(status_msg)
+            print(status_msg, flush=True)
 
 
 if __name__ == "__main__":
@@ -330,14 +341,14 @@ if __name__ == "__main__":
     if args.step:
         bot.run_step()
     else:
-        console.print(f"[bold green]Iniciando Bot de Trading Campeón en modo {args.mode}... (Presiona Ctrl+C para detener)[/bold green]")
+        print(f"=== BOT SOL/USDT 24/7 INICIADO EN MODO {args.mode} ===", flush=True)
         while True:
             try:
                 bot.run_step()
                 time.sleep(10)
             except KeyboardInterrupt:
-                console.print("\n[yellow]Bot detenido por el usuario.[/yellow]")
+                print("\nBot detenido por el usuario.", flush=True)
                 break
             except Exception as e:
-                console.print(f"[red]Error en ciclo del bot: {e}[/red]")
+                print(f"Error en ciclo del bot: {e}", flush=True)
                 time.sleep(10)
