@@ -111,13 +111,17 @@ class TradingStrategy:
         dist_to_high_breakout = round(high_ch - close, 2)
         dist_to_low_breakdown = round(close - low_ch, 2)
 
+        # Anti-Whipsaw Penetration Buffer (0.2% ~ $0.24 on SOL to filter fakeout wicks)
+        min_breakout_long = round(high_ch * (1.0 + 0.002), 2)
+        min_breakdown_short = round(low_ch * (1.0 - 0.002), 2)
+
         # Condition 1: LONG Breakout
-        # Price breaches channel High AND is confirmed above EMA 200
-        if high > high_ch and close > e200:
+        # Price breaches channel High with real penetration AND is confirmed above EMA 200
+        if high >= min_breakout_long and close > e200:
             sl_price = round(high_ch - (self.atr_initial_sl * atr), 2)
             return {
                 "signal": "LONG",
-                "entry_price": high_ch,
+                "entry_price": min_breakout_long,
                 "stop_loss": sl_price,
                 "atr": round(atr, 2),
                 "atr_trail": self.atr_trail,
@@ -126,16 +130,16 @@ class TradingStrategy:
                 "high_ch": round(high_ch, 2),
                 "low_ch": round(low_ch, 2),
                 "strategy_name": self.strategy_name,
-                "reason": f"¡Ruptura Alcista! Precio superó ${high_ch:.2f} con tendencia Macro Alcista (> EMA 200 ${e200:.2f})"
+                "reason": f"¡Ruptura Alcista Confirmada! Precio superó ${min_breakout_long:.2f} con tendencia Macro Alcista (> EMA 200 ${e200:.2f})"
             }
 
         # Condition 2: SHORT Breakdown
-        # Price breaches channel Low AND is confirmed below EMA 200
-        elif low < low_ch and close < e200:
+        # Price breaches channel Low with real penetration AND is confirmed below EMA 200
+        elif low <= min_breakdown_short and close < e200:
             sl_price = round(low_ch + (self.atr_initial_sl * atr), 2)
             return {
                 "signal": "SHORT",
-                "entry_price": low_ch,
+                "entry_price": min_breakdown_short,
                 "stop_loss": sl_price,
                 "atr": round(atr, 2),
                 "atr_trail": self.atr_trail,
@@ -144,7 +148,7 @@ class TradingStrategy:
                 "high_ch": round(high_ch, 2),
                 "low_ch": round(low_ch, 2),
                 "strategy_name": self.strategy_name,
-                "reason": f"¡Ruptura Bajista! Precio perforó ${low_ch:.2f} con tendencia Macro Bajista (< EMA 200 ${e200:.2f})"
+                "reason": f"¡Ruptura Bajista Confirmada! Precio perforó ${min_breakdown_short:.2f} con tendencia Macro Bajista (< EMA 200 ${e200:.2f})"
             }
 
         # Default: Monitoring inside channel

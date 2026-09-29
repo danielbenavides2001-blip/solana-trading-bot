@@ -456,6 +456,7 @@ class BotEngine:
                         self.state["losing_trades"] += 1
                     self.state["in_position"] = False
                     self.state["position"] = None
+                    self.state["last_exit_time"] = time.time()
                     self.save_state()
                     self.cleanup_live_stop_loss()
         except Exception as e:
@@ -532,6 +533,7 @@ class BotEngine:
             })
             self.state["in_position"] = False
             self.state["position"] = None
+            self.state["last_exit_time"] = time.time()
             self.save_state()
 
             # Send Telegram alert
@@ -556,6 +558,16 @@ class BotEngine:
             logging.info(pos_msg)
             print(pos_msg, flush=True)
             self.check_position_exit(curr_price, atr, ema_200)
+            return
+
+        # Cooldown Anti-Whipsaw Filter: Prevent revenge trading & fakeout re-entries
+        last_exit = self.state.get("last_exit_time", 0)
+        time_since_exit = time.time() - last_exit
+        if not self.state["in_position"] and time_since_exit < 2700:  # 45 minutes cooldown
+            mins_left = int((2700 - time_since_exit) / 60)
+            status_msg = f"[COOLDOWN ANTI-SERRUCHO] Mercado en reposo ({mins_left} min restantes para filtrar trampas de liquidez)..."
+            logging.info(status_msg)
+            print(status_msg, flush=True)
             return
 
         # If not in position, check for 24h channel breakout
