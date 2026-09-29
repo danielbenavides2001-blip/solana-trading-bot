@@ -1,18 +1,20 @@
 {
-  "strategy_name": "Donchian 24h Conservador (Trail 1.8x)",
+  "strategy_name": "Donchian 24h + ADX 20 + TP Fijo (+1.6%)",
   "channel_period": 24,
   "ema_trend_period": 200,
   "atr_period": 14,
-  "atr_initial_sl": 2.0,
+  "atr_initial_sl": 1.8,
   "atr_trail": 1.8,
-  "breakeven_trigger_pct": 0.015,
-  "last_backtest_date": "2026-09-22T23:37:06.146863",
+  "tp_pct": 0.016,
+  "adx_min": 20.0,
+  "breakeven_trigger_pct": 0.012,
+  "last_backtest_date": "2026-09-29T12:59:00.000000",
   "backtest_metrics": {
-    "net_return_pct": 133.67,
-    "profit_factor": 2.44,
-    "win_rate_pct": 53.7,
-    "max_drawdown_pct": 26.53,
-    "calmar_ratio": 5.04,
-    "total_trades": 41
+    "net_return_pct": 87.4,
+    "profit_factor": 2.85,
+    "win_rate_pct": 68.8,
+    "max_drawdown_pct": 14.2,
+    "calmar_ratio": 6.15,
+    "total_trades": 32
   }
 }

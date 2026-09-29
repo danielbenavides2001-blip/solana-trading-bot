@@ -1,19 +1,20 @@
 {
   "initial_capital": 21.79,
-  "current_capital": 21.89,
+  "current_capital": 19.46703659,
   "in_position": false,
   "position": null,
-  "total_trades": 1,
+  "total_trades": 2,
   "winning_trades": 1,
-  "losing_trades": 0,
+  "losing_trades": 1,
   "history": [
     {
       "type": "LONG",
       "entry": 119.42,
       "exit": 119.61,
       "reason": "USER_MANUAL_CLOSE",
-      "pnl": 0.10,
+      "pnl": 0.1,
       "closed_at": "2026-09-23T04:57:05.000Z"
     }
-  ]
+  ],
+  "last_exit_time": 1790702464.1922815
 }

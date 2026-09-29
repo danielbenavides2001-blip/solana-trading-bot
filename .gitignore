@@ -18,3 +18,13 @@ bot.log
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Research scripts
+test_*.py
+optimize_tp_sl.py
+evaluate_best.py
+check_*.py
+calc_*.py
+tune_*.py
+diagnose_*.py
+

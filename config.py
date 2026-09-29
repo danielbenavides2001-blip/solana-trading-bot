@@ -21,13 +21,15 @@ MAX_MARGIN_PER_TRADE = 18.0  # USDT margin committed per trade (remaining serves
 # Timeframes & Strategy Mode
 TIMEFRAME = "1h"          # 1-Hour candles (drastically cuts market noise)
 
-# Champion Strategy Parameters: Donchian 24h Breakout + EMA 200 + ATR Trailing Stop
-# Tested on 60 days of Binance Futuros data: +114.3% return, Profit Factor: 2.01
+# Champion Strategy Parameters: Donchian 24h Breakout + EMA 200 + ADX Trend Strength + Target TP
 CHANNEL_PERIOD = 24       # 24-hour cycle high/low breakout
 EMA_TREND_PERIOD = 200    # Macro trend filter (Long only above, Short only below)
 ATR_PERIOD = 14           # Volatility measurement period
-ATR_INITIAL_SL = 2.0      # Initial Stop Loss: 2.0 * ATR
-ATR_TRAIL = 1.7           # Dynamic Trailing Stop: 1.7 * ATR (locks in runners)
+ATR_INITIAL_SL = 1.8      # Initial Stop Loss: 1.8 * ATR
+ATR_TRAIL = 1.8           # Dynamic Trailing Stop
+TP_TARGET_PCT = 0.016     # Fixed Target Take Profit: +1.6% (~$1.35-$1.45 USDT net win)
+ADX_PERIOD = 14           # ADX strength period
+ADX_MIN = 20.0            # Minimum ADX to enter trade (filters sideways/choppy noise)
 
 # Fee structure (Binance Futures USDT-M)
 MAKER_FEE = 0.0002        # 0.02%

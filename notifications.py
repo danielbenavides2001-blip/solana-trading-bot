@@ -37,7 +37,7 @@ class TelegramNotifier:
             f"💼 *Modo:* `{mode}`\n"
             f"💰 *Capital:* `${capital:.2f} USDT`\n"
             f"⚡ *Apalancamiento:* `5x Aislado`\n"
-            f"📊 *Estrategia:* `Donchian 24h + EMA 200 + Trailing ATR`\n\n"
+            f"📊 *Estrategia:* `Donchian 24h + ADX 20 + TP Fijo (+1.6%)`\n\n"
             f"🎯 *Niveles Clave 24h:*\n"
             f"• Techo Long: `${high_ch:.2f}`\n"
             f"• Suelo Short: `${low_ch:.2f}`\n\n"
@@ -45,16 +45,18 @@ class TelegramNotifier:
         )
         self.send_message(msg)
 
-    def notify_trade_opened(self, trade_type: str, price: float, qty: float, sl: float, margin: float):
+    def notify_trade_opened(self, trade_type: str, price: float, qty: float, sl: float, margin: float, tp: float = 0.0):
         icon = "🟢" if trade_type == "LONG" else "🔴"
+        tp_line = f"🎯 *Take Profit Objetivo (+1.6%):* `${tp:.2f}` (~+$1.40 USDT)\n" if tp > 0 else ""
         msg = (
             f"{icon} *NUEVA OPERACIÓN APERTURADA*\n\n"
             f"📈 *Posición:* `{trade_type} (5x)`\n"
             f"💵 *Precio Entrada:* `${price:.2f}`\n"
             f"📦 *Cantidad:* `{qty} SOL`\n"
+            f"{tp_line}"
             f"🛡️ *Stop Loss Inicial:* `${sl:.2f}`\n"
             f"💼 *Margen:* `${margin:.2f} USDT`\n\n"
-            f"⚙️ _Trailing Stop dinámico activado._"
+            f"⚙️ _Target Take Profit y Trailing Stop dinámico activos._"
         )
         self.send_message(msg)
 

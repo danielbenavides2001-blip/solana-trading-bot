@@ -67,6 +67,8 @@ class HealthHandler(BaseHTTPRequestHandler):
             if in_pos and pos:
                 p_type = pos.get("type", "LONG")
                 badge_bg = "#10B981" if p_type == "LONG" else "#EF4444"
+                tp_val = pos.get("take_profit")
+                tp_str = f"${tp_val:.2f}" if tp_val else "Trailing ATR"
                 pos_html = f"""
                 <div class="card active-trade">
                     <div class="card-header">
@@ -76,6 +78,7 @@ class HealthHandler(BaseHTTPRequestHandler):
                     <div class="grid-2">
                         <div><span class="label">Entrada:</span> <span class="val">${pos.get('entry_price', 0):.2f}</span></div>
                         <div><span class="label">Cantidad:</span> <span class="val">{pos.get('quantity', 0)} SOL</span></div>
+                        <div><span class="label">Take Profit (+1.6%):</span> <span class="val" style="color:#34D399">{tp_str}</span></div>
                         <div><span class="label">Stop Loss:</span> <span class="val sl">${pos.get('stop_loss', 0):.2f}</span></div>
                         <div><span class="label">Margen:</span> <span class="val">${pos.get('margin', 0):.2f} USDT</span></div>
                     </div>
@@ -85,7 +88,7 @@ class HealthHandler(BaseHTTPRequestHandler):
                 pos_html = """
                 <div class="card flat">
                     <div class="card-header"><span class="badge" style="background:#6B7280">HOLD (ESPERA)</span></div>
-                    <p style="color:#9CA3AF; margin:10px 0 0 0; font-size:0.85rem;">Capital líquido en USDT. Vigilando ruptura institucional de 24 horas.</p>
+                    <p style="color:#9CA3AF; margin:10px 0 0 0; font-size:0.85rem;">Capital líquido en USDT. Vigilando ruptura institucional de 24h con filtro de fuerza ADX > 20.</p>
                 </div>
                 """
 
@@ -335,11 +338,13 @@ class BotEngine:
             qty_sol = 0.02
 
         sl_price = signal["stop_loss"]
+        tp_price = signal.get("take_profit")
         atr = signal.get("atr", 1.5)
 
+        tp_str = f"${tp_price:.2f}" if tp_price else "Trailing ATR"
         console.print(f"[bold yellow]¡DISPARO DE ORDEN {sig_type} en {self.symbol}![/bold yellow]")
         console.print(f"  Precio Entrada: ${current_price:.2f} | Cantidad: {qty_sol} SOL (~${notional:.2f} notional)")
-        console.print(f"  Margen asignado: ${margin:.2f} USDT | Stop Inicial: ${sl_price:.2f} | ATR: ${atr:.2f}")
+        console.print(f"  Margen asignado: ${margin:.2f} USDT | Stop Inicial: ${sl_price:.2f} | Take Profit: {tp_str} | ATR: ${atr:.2f}")
 
         if self.mode == "LIVE":
             try:
@@ -361,6 +366,7 @@ class BotEngine:
             "type": sig_type,
             "entry_price": current_price,
             "stop_loss": sl_price,
+            "take_profit": tp_price,
             "atr": atr,
             "margin": margin,
             "quantity": qty_sol,
@@ -369,48 +375,68 @@ class BotEngine:
         self.save_state()
 
         # Send Telegram alert
-        self.notifier.notify_trade_opened(sig_type, current_price, qty_sol, sl_price, margin)
+        self.notifier.notify_trade_opened(sig_type, current_price, qty_sol, sl_price, margin, tp=tp_price or 0.0)
 
-        # Sync native Stop Loss order directly to Binance server
+        # Sync native Stop Loss & Take Profit orders directly to Binance server
         if self.mode == "LIVE":
-            self.sync_live_stop_loss(sl_price, sig_type)
+            self.sync_live_bracket_orders(sl_price, tp_price, sig_type)
 
-    def sync_live_stop_loss(self, stop_price: float, pos_type: str):
-        """Places or updates native conditional STOP_MARKET order directly on Binance."""
+    def sync_live_bracket_orders(self, stop_price: float, tp_price: Optional[float], pos_type: str):
+        """Places or updates native conditional STOP_MARKET and TAKE_PROFIT_MARKET orders directly on Binance."""
         if self.mode != "LIVE" or not self.exchange:
             return
         try:
-            # 1. Cancel previous algo stop orders
+            # 1. Cancel previous algo orders
             try:
                 self.exchange.fapiPrivateDeleteAlgoOpenOrders({"symbol": "SOLUSDT"})
             except Exception:
                 pass
 
-            # 2. Place updated STOP_MARKET with closePosition=True
             close_side = "sell" if pos_type == "LONG" else "buy"
-            order = self.exchange.create_order(
+            
+            # 2. Place STOP_MARKET with closePosition=True
+            sl_order = self.exchange.create_order(
                 symbol=self.symbol,
                 type="STOP_MARKET",
                 side=close_side,
                 amount=None,
                 params={"stopPrice": stop_price, "closePosition": True}
             )
-            logging.info(f"[BINANCE SYNC] Stop Loss sincronizado en Binance a ${stop_price:.2f} (Algo ID: {order.get('id')})")
+            logging.info(f"[BINANCE SYNC] Stop Loss sincronizado en Binance a ${stop_price:.2f} (Algo ID: {sl_order.get('id')})")
+
+            # 3. Place TAKE_PROFIT_MARKET with closePosition=True if provided
+            if tp_price:
+                try:
+                    tp_order = self.exchange.create_order(
+                        symbol=self.symbol,
+                        type="TAKE_PROFIT_MARKET",
+                        side=close_side,
+                        amount=None,
+                        params={"stopPrice": tp_price, "closePosition": True}
+                    )
+                    logging.info(f"[BINANCE SYNC] Take Profit sincronizado en Binance a ${tp_price:.2f} (Algo ID: {tp_order.get('id')})")
+                except Exception as tp_err:
+                    logging.warning(f"[BINANCE SYNC] Aviso colocando Take Profit en Binance: {tp_err}")
+
         except Exception as e:
-            logging.warning(f"[BINANCE SYNC] Error sincronizando Stop Loss en Binance: {e}")
+            logging.warning(f"[BINANCE SYNC] Error sincronizando órdenes bracket en Binance: {e}")
+
+    def sync_live_stop_loss(self, stop_price: float, pos_type: str):
+        """Backward-compatible wrapper."""
+        self.sync_live_bracket_orders(stop_price, None, pos_type)
 
     def cleanup_live_stop_loss(self):
-        """Cancels all remaining algo stop orders on Binance when position closes."""
+        """Cancels all remaining algo stop/tp orders on Binance when position closes."""
         if self.mode != "LIVE" or not self.exchange:
             return
         try:
             self.exchange.fapiPrivateDeleteAlgoOpenOrders({"symbol": "SOLUSDT"})
-            logging.info("[BINANCE SYNC] Órdenes stop residuales canceladas en Binance.")
+            logging.info("[BINANCE SYNC] Órdenes bracket residuales canceladas en Binance.")
         except Exception as e:
-            logging.warning(f"[BINANCE SYNC] Error limpiando órdenes stop en Binance: {e}")
+            logging.warning(f"[BINANCE SYNC] Error limpiando órdenes bracket en Binance: {e}")
 
     def reconcile_live_position(self, curr_price: float, atr: float):
-        """Auto-reconciles state with real Binance Futures position & ensures native SL exists."""
+        """Auto-reconciles state with real Binance Futures position & ensures native SL/TP exist."""
         if self.mode != "LIVE" or not self.exchange:
             return
         try:
@@ -424,11 +450,13 @@ class BotEngine:
                 if not self.state["in_position"] or not self.state["position"]:
                     logging.info(f"[AUTO-HEAL] Posición activa detectada en Binance: {side} {contracts} SOL @ ${entry_price:.2f}")
                     calc_sl = round(entry_price - (config.ATR_INITIAL_SL * atr) if side == "LONG" else entry_price + (config.ATR_INITIAL_SL * atr), 2)
+                    calc_tp = round(entry_price * (1.0 + config.TP_TARGET_PCT) if side == "LONG" else entry_price * (1.0 - config.TP_TARGET_PCT), 2)
                     self.state["in_position"] = True
                     self.state["position"] = {
                         "type": side,
                         "entry_price": entry_price,
                         "stop_loss": calc_sl,
+                        "take_profit": calc_tp,
                         "atr": atr,
                         "margin": float(real_pos.get("initialMargin", 18.0)),
                         "quantity": contracts,
@@ -436,12 +464,13 @@ class BotEngine:
                     }
                     self.save_state()
 
-                # Ensure native STOP_MARKET is active on Binance
+                # Ensure native STOP_MARKET / TAKE_PROFIT_MARKET are active on Binance
                 algo_orders = self.exchange.fapiPrivateGetOpenAlgoOrders({"symbol": "SOLUSDT"})
                 if not algo_orders:
                     current_sl = self.state["position"]["stop_loss"]
-                    logging.warning(f"[AUTO-HEAL] Stop Loss ausente en Binance. Sincronizando orden a ${current_sl:.2f}...")
-                    self.sync_live_stop_loss(current_sl, side)
+                    current_tp = self.state["position"].get("take_profit")
+                    logging.warning(f"[AUTO-HEAL] Órdenes bracket ausentes en Binance. Sincronizando SL a ${current_sl:.2f} y TP a ${current_tp}...")
+                    self.sync_live_bracket_orders(current_sl, current_tp, side)
 
             else:
                 if self.state["in_position"]:
@@ -483,7 +512,7 @@ class BotEngine:
             logging.info(f"Stop Loss ajustado a ${pos['stop_loss']:.2f} (Anterior: ${old_sl:.2f} | Precio: ${current_price:.2f})")
             self.notifier.notify_trailing_update(pos["stop_loss"], current_price, pos_type)
             if self.mode == "LIVE":
-                self.sync_live_stop_loss(pos["stop_loss"], pos_type)
+                self.sync_live_bracket_orders(pos["stop_loss"], pos.get("take_profit"), pos_type)
 
         # 2. Check if an exit condition triggered
         if exit_eval["exit"]:

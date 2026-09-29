@@ -59,44 +59,34 @@ class AutoOptimizer:
         ], axis=1).max(axis=1)
         df["atr"] = tr.rolling(14).mean()
 
+        # ADX Calculation
+        up_move = high - high.shift(1)
+        down_move = low.shift(1) - low
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+        
+        tr_smooth = pd.Series(tr).ewm(alpha=1/14, adjust=False).mean()
+        plus_dm_smooth = pd.Series(plus_dm, index=df.index).ewm(alpha=1/14, adjust=False).mean()
+        minus_dm_smooth = pd.Series(minus_dm, index=df.index).ewm(alpha=1/14, adjust=False).mean()
+        
+        plus_di = 100 * (plus_dm_smooth / (tr_smooth + 1e-9))
+        minus_di = 100 * (minus_dm_smooth / (tr_smooth + 1e-9))
+        dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di + 1e-9))
+        df["adx"] = dx.ewm(alpha=1/14, adjust=False).mean()
+
         # Donchian Channels for multiple periods (18, 20, 24)
         for p in [18, 20, 24]:
             df[f"high_ch_{p}"] = high.rolling(p).max().shift(1)
             df[f"low_ch_{p}"] = low.rolling(p).min().shift(1)
 
-        # SuperTrend (10, 3)
-        st_atr = tr.rolling(10).mean()
-        hl2 = (high + low) / 2.0
-        up_band = hl2 - (3.0 * st_atr)
-        dn_band = hl2 + (3.0 * st_atr)
-        supertrend = [True] * len(df)
-        f_up, f_dn = up_band.copy(), dn_band.copy()
-
-        for i in range(1, len(df)):
-            if up_band.iloc[i] > f_up.iloc[i-1] or close.iloc[i-1] < f_up.iloc[i-1]:
-                f_up.iloc[i] = up_band.iloc[i]
-            else:
-                f_up.iloc[i] = f_up.iloc[i-1]
-
-            if dn_band.iloc[i] < f_dn.iloc[i-1] or close.iloc[i-1] > f_dn.iloc[i-1]:
-                f_dn.iloc[i] = dn_band.iloc[i]
-            else:
-                f_dn.iloc[i] = f_dn.iloc[i-1]
-
-            if close.iloc[i] > f_dn.iloc[i-1]:
-                supertrend[i] = True
-            elif close.iloc[i] < f_up.iloc[i-1]:
-                supertrend[i] = False
-            else:
-                supertrend[i] = supertrend[i-1]
-
-        df["supertrend_bull"] = supertrend
         return df
 
     def simulate(self, df: pd.DataFrame, candidate: dict) -> dict:
         period = candidate["channel_period"]
         atr_trail = candidate["atr_trail"]
         atr_sl = candidate["atr_initial_sl"]
+        tp_pct = candidate.get("tp_pct", 0.016)
+        adx_min = candidate.get("adx_min", 20.0)
         h_col = f"high_ch_{period}"
         l_col = f"low_ch_{period}"
 
@@ -114,33 +104,40 @@ class AutoOptimizer:
             low = curr["low"]
             e200 = curr["ema_200"]
             atr = curr["atr"]
+            adx = curr["adx"]
             h_ch = curr[h_col]
             l_ch = curr[l_col]
 
             if in_pos:
-                pt, ep, sl = pos["type"], pos["entry"], pos["sl"]
+                pt, ep, sl, tp = pos["type"], pos["entry"], pos["sl"], pos.get("tp")
                 exit_trade = False
                 exit_p = None
 
                 if pt == "LONG":
-                    # 1. Trailing Stop
-                    new_sl = close - (atr_trail * atr)
-                    if new_sl > sl: pos["sl"] = new_sl; sl = new_sl
+                    # 1. Target Take Profit Hit
+                    if tp and high >= tp:
+                        exit_trade = True; exit_p = tp
                     # 2. Invalidation: Price crosses below EMA 200
-                    if close < e200:
+                    elif close < e200:
                         exit_trade = True; exit_p = close
+                    # 3. Stop Loss Hit
                     elif low <= sl:
                         exit_trade = True; exit_p = sl
+                    
                     if exit_trade:
                         ret = (exit_p - ep) / ep
 
                 else: # SHORT
-                    new_sl = close + (atr_trail * atr)
-                    if new_sl < sl: pos["sl"] = new_sl; sl = new_sl
-                    if close > e200:
+                    # 1. Target Take Profit Hit
+                    if tp and low <= tp:
+                        exit_trade = True; exit_p = tp
+                    # 2. Invalidation: Price crosses above EMA 200
+                    elif close > e200:
                         exit_trade = True; exit_p = close
+                    # 3. Stop Loss Hit
                     elif high >= sl:
                         exit_trade = True; exit_p = sl
+                    
                     if exit_trade:
                         ret = (ep - exit_p) / ep
 
@@ -155,15 +152,30 @@ class AutoOptimizer:
                     in_pos = False
                     pos = {}
 
-            if not in_pos and capital > 10.0 and not np.isnan(atr):
-                # Long Breakout
-                if high > h_ch and close > e200:
-                    in_pos = True
-                    pos = {"type": "LONG", "entry": h_ch, "sl": h_ch - (atr_sl * atr)}
-                # Short Breakdown
-                elif low < l_ch and close < e200:
-                    in_pos = True
-                    pos = {"type": "SHORT", "entry": l_ch, "sl": l_ch + (atr_sl * atr)}
+            if not in_pos and capital > 10.0 and not np.isnan(atr) and not np.isnan(adx):
+                # Filter low momentum / chop
+                if adx >= adx_min:
+                    min_long = round(h_ch * 1.002, 2)
+                    min_short = round(l_ch * 0.998, 2)
+                    
+                    # Long Breakout
+                    if high >= min_long and close > e200:
+                        in_pos = True
+                        pos = {
+                            "type": "LONG",
+                            "entry": min_long,
+                            "sl": round(min_long - (atr_sl * atr), 2),
+                            "tp": round(min_long * (1.0 + tp_pct), 2)
+                        }
+                    # Short Breakdown
+                    elif low <= min_short and close < e200:
+                        in_pos = True
+                        pos = {
+                            "type": "SHORT",
+                            "entry": min_short,
+                            "sl": round(min_short + (atr_sl * atr), 2),
+                            "tp": round(min_short * (1.0 - tp_pct), 2)
+                        }
 
         total = len(trades)
         wins = [t for t in trades if t > 0]
@@ -180,6 +192,8 @@ class AutoOptimizer:
             "channel_period": period,
             "atr_trail": atr_trail,
             "atr_initial_sl": atr_sl,
+            "tp_pct": tp_pct,
+            "adx_min": adx_min,
             "capital": capital,
             "net_return_pct": ret_pct,
             "profit_factor": pf,
@@ -198,10 +212,10 @@ class AutoOptimizer:
             return {}
 
         candidates = [
-            {"name": "Donchian 24h + EMA 200 + ATR Trail 1.7x", "channel_period": 24, "atr_trail": 1.7, "atr_initial_sl": 2.0},
-            {"name": "Donchian 20h + EMA 200 + ATR Trail 1.5x", "channel_period": 20, "atr_trail": 1.5, "atr_initial_sl": 1.8},
-            {"name": "Donchian 18h + EMA 200 + ATR Trail 1.6x", "channel_period": 18, "atr_trail": 1.6, "atr_initial_sl": 1.8},
-            {"name": "Donchian 24h Conservador (Trail 1.8x)", "channel_period": 24, "atr_trail": 1.8, "atr_initial_sl": 2.0},
+            {"name": "Donchian 24h + ADX 20 + TP Fijo (+1.6%)", "channel_period": 24, "atr_trail": 1.8, "atr_initial_sl": 1.8, "tp_pct": 0.016, "adx_min": 20.0},
+            {"name": "Donchian 24h + ADX 20 + TP Fijo (+1.8%)", "channel_period": 24, "atr_trail": 1.8, "atr_initial_sl": 1.8, "tp_pct": 0.018, "adx_min": 20.0},
+            {"name": "Donchian 20h + ADX 20 + TP Fijo (+1.6%)", "channel_period": 20, "atr_trail": 1.7, "atr_initial_sl": 1.8, "tp_pct": 0.016, "adx_min": 20.0},
+            {"name": "Donchian 24h + ADX 18 + TP Fijo (+1.6%)", "channel_period": 24, "atr_trail": 1.8, "atr_initial_sl": 1.8, "tp_pct": 0.016, "adx_min": 18.0},
         ]
 
         scored = []
@@ -221,7 +235,9 @@ class AutoOptimizer:
             "atr_period": 14,
             "atr_initial_sl": winner["atr_initial_sl"],
             "atr_trail": winner["atr_trail"],
-            "breakeven_trigger_pct": 0.015,
+            "tp_pct": winner["tp_pct"],
+            "adx_min": winner["adx_min"],
+            "breakeven_trigger_pct": 0.012,
             "last_backtest_date": datetime.now().isoformat(),
             "backtest_metrics": {
                 "net_return_pct": round(winner["net_return_pct"], 2),
