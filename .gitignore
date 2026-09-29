@@ -27,4 +27,7 @@ check_*.py
 calc_*.py
 tune_*.py
 diagnose_*.py
+audit_*.py
+compare_*.py
+
 
