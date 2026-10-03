@@ -10,6 +10,9 @@ load_dotenv()
 SYMBOL = "SOL/USDT"
 FUTURES_SYMBOL = "SOLUSDT"
 
+# EMERGENCY KILL SWITCH (Set to False to halt all trading activity)
+TRADING_ENABLED = False
+
 # Leverage & Margin
 LEVERAGE = 5
 MARGIN_MODE = "ISOLATED"  # Mandatory ISOLATED margin for safety

@@ -64,7 +64,15 @@ class HealthHandler(BaseHTTPRequestHandler):
             strat = bot.strategy.strategy_name if bot else "Donchian 24h Breakout"
             mode = bot.mode if bot else "UNKNOWN"
 
-            if in_pos and pos:
+            if not getattr(config, "TRADING_ENABLED", True):
+                pos_html = """
+                <div class="card" style="border: 2px solid #EF4444; background: rgba(239, 68, 68, 0.12);">
+                    <div class="card-header"><span class="badge" style="background:#EF4444; font-size:0.85rem;">🛑 TRADING APAGADO (STOPPED)</span></div>
+                    <p style="color:#FCA5A5; margin:10px 0 4px 0; font-size:0.95rem; font-weight:700;">Operaciones detenidas por orden del usuario.</p>
+                    <p style="color:#9CA3AF; margin:0; font-size:0.85rem;">Cero posiciones abiertas. Capital en Binance protegido y 100% líquido en USDT.</p>
+                </div>
+                """
+            elif in_pos and pos:
                 p_type = pos.get("type", "LONG")
                 badge_bg = "#10B981" if p_type == "LONG" else "#EF4444"
                 tp_val = pos.get("take_profit")
@@ -324,6 +332,10 @@ class BotEngine:
 
     def execute_trade(self, signal: dict, current_price: float):
         """Open a position based on Champion Breakout signal."""
+        if not getattr(config, "TRADING_ENABLED", True):
+            logging.warning("[EMERGENCY STOP] Intento de apertura bloqueado: TRADING_ENABLED=False.")
+            return
+
         sig_type = signal["signal"]
         balance = self.get_live_balance()
         
@@ -570,6 +582,20 @@ class BotEngine:
 
     def run_step(self):
         """Single evaluation step of the Champion Bot."""
+        if not getattr(config, "TRADING_ENABLED", True):
+            if self.mode == "LIVE" and self.exchange:
+                try:
+                    orders = self.exchange.fetch_open_orders(self.symbol)
+                    for o in orders:
+                        self.exchange.cancel_order(o['id'], self.symbol)
+                        logging.info(f"[EMERGENCY STOP] Orden {o['id']} cancelada.")
+                except Exception:
+                    pass
+            status_msg = "[EMERGENCY STOP] TRADING DESACTIVADO POR EL USUARIO. CERO OPERACIONES. CAPITAL SEGURO."
+            logging.info(status_msg)
+            print(status_msg, flush=True)
+            return
+
         curr_price = self.market_data.get_current_price()
         df_1h = self.market_data.fetch_candles("1h", limit=250)
         signal = self.strategy.evaluate_signal(df_1h)
